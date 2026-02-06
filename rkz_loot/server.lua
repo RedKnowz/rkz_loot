@@ -1,80 +1,86 @@
 local lootedPeds = {}
+local cooldowns = {}
 
-RegisterNetEvent("loot:checkLooted", function(netId)
-    local src = source
-    local alreadyLooted = lootedPeds[netId] or false
-    TriggerClientEvent("loot:receiveLootStatus", src, netId, alreadyLooted)
-end)
+local function isOnCooldown(src)
+    local now = os.time()
+    if cooldowns[src] and cooldowns[src] > now then
+        return true
+    end
+    cooldowns[src] = now + 3
+    return false
+end
 
-RegisterNetEvent("loot:giveLoot", function(netId, pedType)
+RegisterNetEvent("loot:checkPed", function(netId)
     local src = source
+    local ped = NetworkGetEntityFromNetworkId(netId)
+
+    if not DoesEntityExist(ped) then return end
+    if not IsPedDeadOrDying(ped, true) then return end
 
     if lootedPeds[netId] then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Loot',
-            description = 'This body has already been looted.',
-            type = 'error'
-        })
+        TriggerClientEvent("loot:allowTarget", src, netId, true)
+        return
+    end
+
+    TriggerClientEvent("loot:allowTarget", src, netId, false)
+end)
+
+RegisterNetEvent("loot:requestLoot", function(netId)
+    local src = source
+
+    if isOnCooldown(src) then return end
+
+    local ped = NetworkGetEntityFromNetworkId(netId)
+    if not DoesEntityExist(ped) then return end
+    if not IsPedDeadOrDying(ped, true) then return end
+
+    if lootedPeds[netId] then return end
+
+    local playerPed = GetPlayerPed(src)
+    local playerCoords = GetEntityCoords(playerPed)
+    local pedCoords = GetEntityCoords(ped)
+
+    if #(playerCoords - pedCoords) > 3.0 then
+        print(("SECURITY: %s attempted distance exploit on loot"):format(GetPlayerName(src)))
         return
     end
 
     lootedPeds[netId] = true
 
-    local lootTable = getLootTable(pedType)
-    local loot = getRandomLoot(lootTable)
-    if not loot then return end
+    local pedType = GetPedType(ped)
+    local lootTable = {}
 
-    local amount = math.random(loot.min, loot.max)
-    local success = exports.ox_inventory:AddItem(src, loot.item, amount)
-
-    if success then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Loot',
-            description = 'You found ' .. amount .. 'x ' .. loot.item,
-            type = 'success'
-        })
+    if pedType == 6 then
+        lootTable = {
+            { item = "pistol_ammo", amount = 1 },
+            { item = "bandage", amount = 1 }
+        }
+    elseif pedType == 4 then
+        lootTable = {
+            { item = "lockpick", amount = 1 }
+        }
     else
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Loot',
-            description = 'Failed to add item: ' .. loot.item,
-            type = 'error'
+        lootTable = {
+            { item = "money", amount = math.random(20, 80) }
+        }
+    end
+
+    for _, loot in ipairs(lootTable) do
+        exports.ox_inventory:AddItem(src, loot.item, loot.amount)
+    end
+
+    TriggerEvent("loot:dispatch", src, pedCoords)
+end)
+
+AddEventHandler("loot:dispatch", function(src, coords)
+    local dispatch = exports.qbx_core:GetDispatchSystem()
+
+    if dispatch == "qbx" then
+        TriggerEvent("qbx_dispatch:server:notify", {
+            job = "police",
+            coords = coords,
+            title = "Body Looting",
+            message = "A citizen is looting a dead body."
         })
     end
 end)
-
-function getLootTable(pedType)
-    if pedType == "cop" then
-        return {
-            {item = "pistol_ammo", min = 10, max = 20, chance = 70},
-            {item = "kevlar", min = 1, max = 1, chance = 30}
-        }
-    elseif pedType == "gang" then
-        return {
-            {item = "lockpick", min = 1, max = 2, chance = 50},
-            {item = "joint", min = 1, max = 3, chance = 50}
-        }
-    else
-        return {
-             {item = "money", min = 50, max = 200, chance = 60}, 
-             {item = "bandage", min = 1, max = 2, chance = 60},
-             {item = "ammo-9", min = 5, max = 15, chance = 30},
-             {item = "lockpick", min = 1, max = 1, chance = 8},
-             {item = "goldbar", min = 1, max = 1, chance = 5},
-             {item = "WEAPON_PISTOL", min = 1, max = 1, chance = 1}
-        }
-    end
-end
-
-function getRandomLoot(table)
-    local roll = math.random(1, 100)
-    local cumulative = 0
-
-    for _, loot in ipairs(table) do
-        cumulative = cumulative + loot.chance
-        if roll <= cumulative then
-            return loot
-        end
-    end
-
-    return nil
-end
