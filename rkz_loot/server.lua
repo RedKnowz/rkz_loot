@@ -1,6 +1,7 @@
 local lootedPeds = {}
 local cooldowns = {}
 
+-- Anti-spam cooldown
 local function isOnCooldown(src)
     local now = os.time()
     if cooldowns[src] and cooldowns[src] > now then
@@ -10,12 +11,19 @@ local function isOnCooldown(src)
     return false
 end
 
+-- Server-safe ped death check
+local function isPedDeadServer(ped)
+    if not ped or ped == 0 then return false end
+    if not DoesEntityExist(ped) then return false end
+    return GetEntityHealth(ped) <= 0
+end
+
+-- Server checks if ped can be targeted
 RegisterNetEvent("loot:checkPed", function(netId)
     local src = source
     local ped = NetworkGetEntityFromNetworkId(netId)
 
-    if not DoesEntityExist(ped) then return end
-    if not IsPedDeadOrDying(ped, true) then return end
+    if not isPedDeadServer(ped) then return end
 
     if lootedPeds[netId] then
         TriggerClientEvent("loot:allowTarget", src, netId, true)
@@ -25,17 +33,26 @@ RegisterNetEvent("loot:checkPed", function(netId)
     TriggerClientEvent("loot:allowTarget", src, netId, false)
 end)
 
-RegisterNetEvent("loot:requestLoot", function(netId)
+-- Client requests loot (pedType sent from client)
+RegisterNetEvent("loot:requestLoot", function(netId, pedType)
     local src = source
 
     if isOnCooldown(src) then return end
 
     local ped = NetworkGetEntityFromNetworkId(netId)
-    if not DoesEntityExist(ped) then return end
-    if not IsPedDeadOrDying(ped, true) then return end
+    if not isPedDeadServer(ped) then return end
 
+    -- Prevent double looting
     if lootedPeds[netId] then return end
 
+    -- Validate pedType (anti-spoof)
+    pedType = tonumber(pedType)
+    if not pedType or pedType < 0 or pedType > 28 then
+        print(("SECURITY: %s sent invalid pedType"):format(GetPlayerName(src)))
+        return
+    end
+
+    -- Distance validation
     local playerPed = GetPlayerPed(src)
     local playerCoords = GetEntityCoords(playerPed)
     local pedCoords = GetEntityCoords(ped)
@@ -45,9 +62,10 @@ RegisterNetEvent("loot:requestLoot", function(netId)
         return
     end
 
+    -- Mark ped as looted
     lootedPeds[netId] = true
 
-    local pedType = GetPedType(ped)
+    -- Loot tables
     local lootTable = {}
 
     if pedType == 6 then
@@ -65,22 +83,21 @@ RegisterNetEvent("loot:requestLoot", function(netId)
         }
     end
 
+    -- Give loot
     for _, loot in ipairs(lootTable) do
         exports.ox_inventory:AddItem(src, loot.item, loot.amount)
     end
 
+    -- Dispatch alert
     TriggerEvent("loot:dispatch", src, pedCoords)
 end)
 
+-- Dispatch (safe version)
 AddEventHandler("loot:dispatch", function(src, coords)
-    local dispatch = exports.qbx_core:GetDispatchSystem()
-
-    if dispatch == "qbx" then
-        TriggerEvent("qbx_dispatch:server:notify", {
-            job = "police",
-            coords = coords,
-            title = "Body Looting",
-            message = "A citizen is looting a dead body."
-        })
-    end
+    TriggerEvent("qbx_dispatch:server:notify", {
+        job = "police",
+        coords = coords,
+        title = "Body Looting",
+        message = "A citizen is looting a dead body."
+    })
 end)
