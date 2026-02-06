@@ -1,6 +1,8 @@
 fx_version 'cerulean'
 game 'gta5'
 
+authur 'RedKnowz'
+
 client_script 'client.lua'
 server_script 'server.lua'
 
@@ -12,4 +14,5 @@ files {
     'html/index.html',
     'html/style.css',
     'html/script.js'
+
 }
