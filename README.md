@@ -6,6 +6,16 @@
 
 It is built to be lightweight, easy to install, and simple to customize for different server styles.
 
+✔️ Server‑side validation
+✔️ Anti‑spoofing
+✔️ Anti‑teleport looting
+✔️ Anti‑instant looting
+✔️ Anti‑spam
+✔️ Server‑side pedType detection
+✔️ Server‑side loot tables
+✔️ Qbox/QBX dispatch support
+✔️ Clean, optimized client scannin
+
 ## ⚙️ Features
 
 * QBX-compatible
