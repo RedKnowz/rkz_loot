@@ -1,8 +1,8 @@
 local addedTargets = {}
-local lootedPeds = {}
+local activeLoots = {}
 
-RegisterNetEvent("loot:receiveLootStatus", function(netId, alreadyLooted)
-    if alreadyLooted or lootedPeds[netId] then return end
+RegisterNetEvent("loot:allowTarget", function(netId, alreadyLooted)
+    if alreadyLooted or addedTargets[netId] then return end
 
     local ped = NetworkGetEntityFromNetworkId(netId)
     if not DoesEntityExist(ped) then return end
@@ -14,7 +14,7 @@ RegisterNetEvent("loot:receiveLootStatus", function(netId, alreadyLooted)
             label = 'Loot Body',
             distance = 2.0,
             onSelect = function()
-                lootPed(ped)
+                startLooting(ped, netId)
             end
         }
     })
@@ -22,85 +22,10 @@ RegisterNetEvent("loot:receiveLootStatus", function(netId, alreadyLooted)
     addedTargets[netId] = true
 end)
 
-RegisterNUICallback("progressComplete", function(_, cb)
-    TriggerEvent("loot:progressFinished")
-    SetNuiFocus(false, false)
-    cb({})
-end)
+function startLooting(ped, netId)
+    if activeLoots[netId] then return end
+    activeLoots[netId] = true
 
--- UNIVERSAL DISPATCH SUPPORT
-function sendDispatchAlert()
-    local coords = GetEntityCoords(PlayerPedId())
-
-    -- ps-dispatch
-    if GetResourceState('ps-dispatch') == 'started' then
-        exports['ps-dispatch']:CustomAlert({
-            coords = coords,
-            message = "Suspicious activity: possible body looting",
-            dispatchCode = "10-37",
-            radius = 25,
-            job = {"police"}
-        })
-        return
-    end
-
-    -- cd_dispatch
-    if GetResourceState('cd_dispatch') == 'started' then
-        TriggerServerEvent('cd_dispatch:AddNotification', {
-            job_table = {'police'},
-            coords = coords,
-            title = 'Suspicious Activity',
-            message = 'A person is looting a body.',
-            flash = 0,
-            unique_id = tostring(math.random(1111111,9999999)),
-            sound = 1
-        })
-        return
-    end
-
-    -- core-dispatch
-    if GetResourceState('core_dispatch') == 'started' then
-        TriggerServerEvent('core_dispatch:addCall', '10-37', 'Body Looting', {
-            {icon = 'fa-user', info = 'Suspicious individual'},
-            {icon = 'fa-location-dot', info = 'Looting a dead body'}
-        }, coords, false)
-        return
-    end
-
-    -- qs-dispatch
-    if GetResourceState('qs-dispatch') == 'started' then
-        exports['qs-dispatch']:createAlert({
-            coords = coords,
-            title = "Suspicious Activity",
-            message = "Someone is looting a body.",
-            job = {"police"},
-            code = "10-37"
-        })
-        return
-    end
-
-    -- qbx_dispatch (stock QBX)
-    if GetResourceState('qbx_dispatch') == 'started' then
-        TriggerServerEvent('qbx_dispatch:server:notify', {
-            coords = coords,
-            title = 'Suspicious Activity',
-            message = 'Someone is looting a body.',
-            type = 'police'
-        })
-        return
-    end
-
-    -- Fallback
-    print("^3[LOOT] No dispatch system detected, skipping alert.^7")
-end
-
-function lootPed(ped)
-    if not NetworkGetEntityIsNetworked(ped) then
-        NetworkRegisterEntityAsNetworked(ped)
-    end
-
-    local netId = NetworkGetNetworkIdFromEntity(ped)
-    local pedType = getPedType(ped)
     local player = PlayerPedId()
 
     RequestAnimDict("amb@world_human_bum_wash@male@low@idle_a")
@@ -108,42 +33,27 @@ function lootPed(ped)
         Wait(10)
     end
 
-    TaskPlayAnim(player, "amb@world_human_bum_wash@male@low@idle_a", "idle_a",
-        8.0, -8.0, -1, 1, 0, false, false, false)
-
-    local finished = false
-    local timeout = GetGameTimer() + 4000
+    TaskPlayAnim(player, "amb@world_human_bum_wash@male@low@idle_a", "idle_a", 8.0, -8.0, -1, 1, 0, false, false, false)
 
     SetNuiFocus(true, false)
     SendNUIMessage({ action = "startProgress", duration = 3500 })
 
-    local function onFinish()
-        finished = true
-    end
+    local finished = false
+    local timeout = GetGameTimer() + 4000
 
-    -- Store handler ID
-    local handler = AddEventHandler("loot:progressFinished", onFinish)
+    RegisterNetEvent("loot:progressFinished", function()
+        finished = true
+    end)
 
     while not finished and GetGameTimer() < timeout do
         Wait(100)
-    end
-
-    -- Remove handler safely
-    if handler then
-        RemoveEventHandler(handler)
-        handler = nil
     end
 
     SetNuiFocus(false, false)
     ClearPedTasks(player)
 
     if finished then
-        lootedPeds[netId] = true
-        exports.ox_target:removeLocalEntity(ped, 'loot_dead_npc_' .. netId)
-        TriggerServerEvent("loot:giveLoot", netId, pedType)
-
-        -- Dispatch alert
-        sendDispatchAlert()
+        TriggerServerEvent("loot:requestLoot", netId)
     else
         lib.notify({
             title = 'Loot',
@@ -153,14 +63,14 @@ function lootPed(ped)
             duration = 4000
         })
     end
+
+    activeLoots[netId] = nil
 end
 
-function getPedType(ped)
-    if IsPedAPlayer(ped) then return "player" end
-    if IsPedInAnyPoliceVehicle(ped) or GetPedType(ped) == 6 then return "cop" end
-    if GetPedRelationshipGroupHash(ped) == GetHashKey("AMBIENT_GANG_LOST") then return "gang" end
-    return "civilian"
-end
+RegisterNUICallback("progressComplete", function(_, cb)
+    TriggerEvent("loot:progressFinished")
+    cb({})
+end)
 
 CreateThread(function()
     while true do
@@ -170,17 +80,15 @@ CreateThread(function()
         local success
 
         repeat
-            if DoesEntityExist(ped) and not IsPedAPlayer(ped) then
-                if IsPedDeadOrDying(ped, true) then
-                    if not NetworkGetEntityIsNetworked(ped) then
-                        NetworkRegisterEntityAsNetworked(ped)
-                    end
+            if DoesEntityExist(ped) and not IsPedAPlayer(ped) and IsPedDeadOrDying(ped, true) then
+                if not NetworkGetEntityIsNetworked(ped) then
+                    NetworkRegisterEntityAsNetworked(ped)
+                end
 
-                    local netId = NetworkGetNetworkIdFromEntity(ped)
+                local netId = NetworkGetNetworkIdFromEntity(ped)
 
-                    if not addedTargets[netId] and not lootedPeds[netId] then
-                        TriggerServerEvent("loot:checkLooted", netId)
-                    end
+                if not addedTargets[netId] then
+                    TriggerServerEvent("loot:checkPed", netId)
                 end
             end
 
