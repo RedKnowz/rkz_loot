@@ -1,0 +1,39 @@
+body {
+  margin: 0;
+  background: transparent;
+  font-family: 'Orbitron', sans-serif;
+}
+
+#progress-container {
+  position: fixed;
+  bottom: 40px;                 /* stays bottom-centered */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 500px;
+  text-align: center;
+  color: #ff0000;
+  text-shadow: 0 0 10px #000000;
+  display: none;
+}
+
+#label {
+  font-size: 26px;              /* bigger text */
+  margin-bottom: 12px;
+}
+
+#bar {
+  width: 100%;
+  height: 14px;                 /* smaller bar height */
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid #000000;
+  box-shadow: 0 0 10px #ff0000;
+  overflow: hidden;
+  border-radius: 6px;           /* optional: smoother look */
+}
+
+#fill {
+  height: 100%;
+  width: 0%;
+  background: #ff0000;
+  box-shadow: 0 0 20px #000000;
+}
