@@ -1,8 +1,18 @@
 local addedTargets = {}
 local activeLoots = {}
 
+-- Server tells client whether ped is already looted
 RegisterNetEvent("loot:allowTarget", function(netId, alreadyLooted)
-    if alreadyLooted or addedTargets[netId] then return end
+    if alreadyLooted then
+        -- Remove target if it somehow exists
+        if addedTargets[netId] then
+            exports.ox_target:removeLocalEntity(netId)
+            addedTargets[netId] = nil
+        end
+        return
+    end
+
+    if addedTargets[netId] then return end
 
     local ped = NetworkGetEntityFromNetworkId(netId)
     if not DoesEntityExist(ped) then return end
@@ -19,9 +29,10 @@ RegisterNetEvent("loot:allowTarget", function(netId, alreadyLooted)
         }
     })
 
-    addedTargets[netId] = true
+    addedTargets[netId] = ped
 end)
 
+-- Looting logic
 function startLooting(ped, netId)
     if activeLoots[netId] then return end
     activeLoots[netId] = true
@@ -53,7 +64,14 @@ function startLooting(ped, netId)
     ClearPedTasks(player)
 
     if finished then
-        TriggerServerEvent("loot:requestLoot", netId)
+        local pedType = GetPedType(ped) or 0
+        TriggerServerEvent("loot:requestLoot", netId, pedType)
+
+        -- REMOVE TARGET IMMEDIATELY AFTER LOOTING
+        if addedTargets[netId] then
+            exports.ox_target:removeLocalEntity(addedTargets[netId])
+            addedTargets[netId] = nil
+        end
     else
         lib.notify({
             title = 'Loot',
@@ -67,11 +85,13 @@ function startLooting(ped, netId)
     activeLoots[netId] = nil
 end
 
+-- NUI callback
 RegisterNUICallback("progressComplete", function(_, cb)
     TriggerEvent("loot:progressFinished")
     cb({})
 end)
 
+-- Ped scanner
 CreateThread(function()
     while true do
         Wait(1000)
@@ -80,7 +100,10 @@ CreateThread(function()
         local success
 
         repeat
-            if DoesEntityExist(ped) and not IsPedAPlayer(ped) and IsPedDeadOrDying(ped, true) then
+            if DoesEntityExist(ped)
+                and not IsPedAPlayer(ped)
+                and IsPedDeadOrDying(ped, true)
+            then
                 if not NetworkGetEntityIsNetworked(ped) then
                     NetworkRegisterEntityAsNetworked(ped)
                 end
